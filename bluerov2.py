@@ -12,8 +12,7 @@ from datetime import datetime
 
 # Config (safe defaults)
 CONN_STR = sys.argv[1] if len(sys.argv) > 1 else "udpin:0.0.0.0:14550"
-BAUD = 115200  # used only for serial if you pass e.g. /dev/ttyUSB0 (or include :baud in arg)
-RATE_HZ = 10  #  controls responsiveness vs. CPU/network/load
+RATE_HZ = 30  #  controls responsiveness vs. CPU/network/load
 MAX_V = 0.3           # m/s (reduced)
 MAX_Z_V = 0.2         # m/s (down positive in NED)
 MAX_YAW_RATE_DEG = 15 # deg/s (reduced)
@@ -25,13 +24,6 @@ VIDEO_SRC     = 'rtsp://192.168.2.2:8554/video_rtsp_stream_0'
 
 
 # Helpers
-
-def send_heartbeat():
-    master.mav.heartbeat_send(
-        mavutil.mavlink.MAV_TYPE_GCS,
-        mavutil.mavlink.MAV_AUTOPILOT_INVALID,
-        0, 0, 0
-    )
 
 def saveSession():
     timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
@@ -48,12 +40,7 @@ def connect(connection):
     if connection.startswith("tcp:") or connection.startswith("udp:") or connection.startswith("udpin:"):
         master = mavutil.mavlink_connection(connection)
     else:
-        # allow calling with '/dev/ttyUSB0:57600' or '/dev/ttyUSB0'
-        if ":" in connection:
-            port, baud = connection.rsplit(":", 1)
-            master = mavutil.mavlink_connection(port, baud=int(baud))
-        else:
-            master = mavutil.mavlink_connection(connection, baud=BAUD)
+        return None
     return master
 
 def wait_for_heartbeat(master, timeout=5, retries=3):
@@ -149,36 +136,9 @@ clock = pygame.time.Clock()
 
 vx = vy = vz = yaw_rate_deg = 0.0
 
-
-def moveJoyStick():
-    master.mav.manual_control_send(
-            master.target_system,
-            500, 0, 500, 0, 
-            0
-        )
-
 def stop_motion():
-    #master.mav.manual_control_send(master.target_system, 0, 0, 500, 0, 0)
-
     # Send zero velocity setpoint (safe stop)
     send_velocity(0.0, 0.0, 0.0, 0.0)
-
-
-def sendaway():
-    start_time = time.time()
-    while time.time() - start_time < 5:
-        send_heartbeat()
-        
-        # Arguments: target_system, x, y, z, r, buttons
-        # x=300 moves forward at half speed
-        # z=500 keeps depth neutral (stops sinking/floating)
-        master.mav.manual_control_send(
-            master.target_system,
-            500, 0, 500, 0, 
-            0
-        )
-        
-        time.sleep(0.1) # 10 Hz frequency
 
 
 def send_velocity(vx, vy, vz, yaw_rate_deg_s):
@@ -301,20 +261,8 @@ try:
 
         print('Sending <', vx, ',', vy, ',', vz, '>')
         send_velocity(vx, vy, vz, yaw_rate_deg)
-        #moveJoyStick()
-        #endaway()
 
-        st = master.recv_match(type='STATUSTEXT', blocking=False)
-        if st: print("STATUSTEXT:", st.text)
-        # check some telemetry that should change (if available)
-        lp = master.recv_match(type='LOCAL_POSITION_NED', blocking=False)
-        if lp: print("LOCAL_POS:", lp.x, lp.y, lp.z)
-        vel = master.recv_match(type='VLOCAL_POSITION_NED', blocking=False)  # may not exist; try VISION_POSITION_ESTIMATE or VEL_NED
-        if vel: print("VEL:", vel)
-
-
-
-        #clock.tick(RATE_HZ)
+        clock.tick(RATE_HZ)
 finally:
     print("Stopping vehicle and cleaning up")
     cap.release()
