@@ -11,7 +11,7 @@ import pygame
 from datetime import datetime
 
 # Config (safe defaults)
-CONN_STR = sys.argv[1] if len(sys.argv) > 1 else "udp:127.0.0.1:14550"
+CONN_STR = sys.argv[1] if len(sys.argv) > 1 else "udpin:0.0.0.0:14550"
 BAUD = 115200  # used only for serial if you pass e.g. /dev/ttyUSB0 (or include :baud in arg)
 RATE_HZ = 10  #  controls responsiveness vs. CPU/network/load
 MAX_V = 0.3           # m/s (reduced)
@@ -21,10 +21,17 @@ HEARTBEAT_TIMEOUT = 10.0  # seconds before considering connection lost
 ARM_TIMEOUT = 10.0       # seconds to wait for arming
 
 # NOTE: Video capture is independent of MAVLink messaging.
-VIDEO_SRC     = 0                  # 0 = webcam | 'rtsp://192.168.2.2:8554/video_rtsp_stream_0' = ROV camera
+VIDEO_SRC     = 'rtsp://192.168.2.2:8554/video_rtsp_stream_0' 
 
 
 # Helpers
+
+def send_heartbeat():
+    master.mav.heartbeat_send(
+        mavutil.mavlink.MAV_TYPE_GCS,
+        mavutil.mavlink.MAV_AUTOPILOT_INVALID,
+        0, 0, 0
+    )
 
 def saveSession():
     timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
@@ -38,7 +45,7 @@ def saveSession():
 
 def connect(connection):
     print("Connecting to", connection)
-    if connection.startswith("tcp:") or connection.startswith("udp:"):
+    if connection.startswith("tcp:") or connection.startswith("udp:") or connection.startswith("udpin:"):
         master = mavutil.mavlink_connection(connection)
     else:
         # allow calling with '/dev/ttyUSB0:57600' or '/dev/ttyUSB0'
@@ -65,6 +72,7 @@ def wait_for_heartbeat(master, timeout=5, retries=3):
                         print("Yeay..Received heartbeat from sys=%u comp=%u" % (master.target_system, master.target_component))
                         return hb
                     time.sleep(0.5)
+                return None
         print(f"Heartbeat wait attempt {i+1}/{retries} timed out")
         time.sleep(0.5)
     return None
@@ -141,24 +149,60 @@ clock = pygame.time.Clock()
 
 vx = vy = vz = yaw_rate_deg = 0.0
 
+
+def moveJoyStick():
+    master.mav.manual_control_send(
+            master.target_system,
+            500, 0, 500, 0, 
+            0
+        )
+
 def stop_motion():
+    #master.mav.manual_control_send(master.target_system, 0, 0, 500, 0, 0)
+
     # Send zero velocity setpoint (safe stop)
     send_velocity(0.0, 0.0, 0.0, 0.0)
 
+
+def sendaway():
+    start_time = time.time()
+    while time.time() - start_time < 5:
+        send_heartbeat()
+        
+        # Arguments: target_system, x, y, z, r, buttons
+        # x=300 moves forward at half speed
+        # z=500 keeps depth neutral (stops sinking/floating)
+        master.mav.manual_control_send(
+            master.target_system,
+            500, 0, 500, 0, 
+            0
+        )
+        
+        time.sleep(0.1) # 10 Hz frequency
+
+
 def send_velocity(vx, vy, vz, yaw_rate_deg_s):
+
     # type_mask: ignore position (1+2+4)=7, ignore acceleration (8+16+32)=56, ignore yaw position (512)
     # => type_mask = 7 + 56 + 512 = 575  (enable velocity and yaw_rate)
 
     # alternative 0b0000010111000111: accept velocity fields and a yaw angle, 
     # while ignoring position, acceleration, and yaw-rate fields.
-    type_mask = 575
 
 
     # time_boot_ms is the MAVLink field that should contain the time (in milliseconds) since 
     # the autopilot/system boot (uint32). 
     # Purpose: give receivers a common time base for the message (ordering, latency measures, replay protection).
+
     time_boot_ms = int(time.time() * 1000) & 0xFFFFFFFF
     yaw_rate_rad_s = radians(yaw_rate_deg_s)
+    type_mask = 0b1111000111  #967  # use vx,vy,vz and yaw_rate
+
+    '''
+    type_mask = 0b0000010111000111 #575
+    time_boot_ms = int(time.time() * 1000) & 0xFFFFFFFF
+    yaw_rate_rad_s = radians(yaw_rate_deg_s)
+    '''
     try:
         master.mav.set_position_target_local_ned_send(
             time_boot_ms,
@@ -173,6 +217,7 @@ def send_velocity(vx, vy, vz, yaw_rate_deg_s):
         )
     except Exception as e:
         print("Failed to send setpoint:", e)
+
 
 print("Controls: arrows/WASD = move, Q/E = up/down, Z/X = yaw left/right, Space = stop, Esc = quit")
 
@@ -250,12 +295,26 @@ try:
             ok, frame = cap.retrieve() # retrieve actual frame
             if ok and frame is not None:
                 cv2.imshow("Video", frame)
-                fname = "frame-"+str(len(data))+".jpg",
+                fname = "frame-"+str(len(data))+".jpg"
                 cv2.imwrite(fname, frame) 
                 data.append((vx, vy, vz, yaw_rate_deg, fname))
 
+        print('Sending <', vx, ',', vy, ',', vz, '>')
         send_velocity(vx, vy, vz, yaw_rate_deg)
-        clock.tick(RATE_HZ)
+        #moveJoyStick()
+        #endaway()
+
+        st = master.recv_match(type='STATUSTEXT', blocking=False)
+        if st: print("STATUSTEXT:", st.text)
+        # check some telemetry that should change (if available)
+        lp = master.recv_match(type='LOCAL_POSITION_NED', blocking=False)
+        if lp: print("LOCAL_POS:", lp.x, lp.y, lp.z)
+        vel = master.recv_match(type='VLOCAL_POSITION_NED', blocking=False)  # may not exist; try VISION_POSITION_ESTIMATE or VEL_NED
+        if vel: print("VEL:", vel)
+
+
+
+        #clock.tick(RATE_HZ)
 finally:
     print("Stopping vehicle and cleaning up")
     cap.release()
