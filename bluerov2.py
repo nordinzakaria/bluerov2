@@ -17,7 +17,7 @@ MAX_V = 0.3           # m/s (reduced)
 MAX_Z_V = 0.2         # m/s (down positive in NED)
 MAX_YAW_RATE_DEG = 15 # deg/s (reduced)
 HEARTBEAT_TIMEOUT = 10.0  # seconds before considering connection lost
-ARM_TIMEOUT = 10.0       # seconds to wait for arming
+ARM_TIMEOUT = 30.0       # seconds to wait for arming
 
 # NOTE: Video capture is independent of MAVLink messaging.
 VIDEO_SRC     = 'rtsp://192.168.2.2:8554/video_rtsp_stream_0' 
@@ -206,22 +206,22 @@ try:
             vx = MAX_V
         elif keys[pygame.K_DOWN] or keys[pygame.K_s]:
             vx = -MAX_V
-        else:
-            vx = 0.0
+        #else:
+        #    vx = 0.0
         # Left/right (vy right positive)
         if keys[pygame.K_RIGHT] or keys[pygame.K_d]:
             vy = MAX_V
         elif keys[pygame.K_LEFT] or keys[pygame.K_a]:
             vy = -MAX_V
-        else:
-            vy = 0.0
+        #else:
+        #    vy = 0.0
         # Up/down (NED: down positive)
         if keys[pygame.K_q]:
             vz = -MAX_Z_V
         elif keys[pygame.K_e]:
             vz = MAX_Z_V
-        else:
-            vz = 0.0
+        #else:
+        #    vz = 0.0
         # Yaw
         if keys[pygame.K_z]:
             yaw_rate_deg = -MAX_YAW_RATE_DEG
